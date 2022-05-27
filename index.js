@@ -15,6 +15,23 @@ const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster
 
 const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true, serverApi: ServerApiVersion.v1 });
 
+
+function verifyJWT(req, res, next) {
+    const authHeader = req.headers.authorization
+    if (!authHeader) {
+        res.status(401).send({ message: "Unauthorized access" })
+    }
+    const token = authHeader.split(' ')[1]
+    jwt.verify(token, process.env.ACCESS_TOKEN, function (err, decoded) {
+        if (err) {
+            res.status(403).send({ message: 'forbidden access' })
+        }
+        req.decoded = decoded
+        next()
+    });
+}
+
+
 async function run() {
     try {
         await client.connect();
@@ -22,6 +39,7 @@ async function run() {
         const productCollection = client.db('auto_parts').collection('products');
         const orderCollection = client.db('auto_parts').collection('orders')
         const userCollection = client.db('auto_parts').collection('users')
+        const reviewCollection = client.db('auto_parts').collection('reviews')
 
 
 
@@ -51,11 +69,11 @@ async function run() {
             res.send(product);
         })
 
-        
+
 
         // put order in orders collection
-        app.put('/order', async (req, res) => {
-           
+        app.put('/order', verifyJWT, async (req, res) => {
+
             const order = req.body
             const filter = {
                 email: order.email,
@@ -95,6 +113,60 @@ async function run() {
                 const result = await orderCollection.insertOne(order)
                 return res.send({ result, updatedTool })
             }
+        })
+
+        // user ordered api
+        app.get('/userorder', verifyJWT, async (req, res) => {
+            const email = req.query.email
+            const authorization = req.headers.authorization
+            const decodedEmail = req.decoded.email
+            if (email === decodedEmail) {
+                const query = { email: email }
+                const orders = await orderCollection.find(query).toArray()
+                return res.send(orders)
+            }
+            else {
+                res.status(403).send({ message: 'forbidden access' })
+            }
+        })
+        // add review
+        app.post('/userreview', verifyJWT, async (req, res) => {
+            const review = req.body
+            console.log(review);
+            const result = await reviewCollection.insertOne(review)
+            res.send(result)
+        })
+
+        app.get('/reviews', async (req, res) => {
+            const reviews = await reviewCollection.find().toArray()
+            res.send(reviews)
+        })
+
+        // update user
+        app.put('/updateduser', verifyJWT, async (req, res) => {
+            const email = req.query.email
+            const updatedUser = req.body
+            const filter = { email: email }
+            const options = { upsert: true };
+            const updateDoc = {
+                $set: {
+                    name: updatedUser.name,
+                    img: updatedUser.img,
+                    phone: updatedUser.phone,
+                    education: updatedUser.education,
+                    address: updatedUser.address,
+                    linkedin: updatedUser.linkedin
+                },
+            };
+            const result = await userCollection.updateOne(filter, updateDoc, options)
+            res.send(result)
+        })
+
+        app.get('/user', verifyJWT, async (req, res) => {
+            const email = req.query.email
+            const query = { email: email }
+            const result = await userCollection.findOne(query)
+            res.send(result)
         })
     }
     finally {
