@@ -41,7 +41,16 @@ async function run() {
         const userCollection = client.db('auto_parts').collection('users')
         const reviewCollection = client.db('auto_parts').collection('reviews')
 
-
+        // const verifyAdmin = async (req, res, next) => {
+        //     const requester = req.decoded.email
+        //     const requesterAccount = await userCollection.findOne({ email: requester })
+        //     if (requesterAccount.role === 'admin') {
+        //         next()
+        //     }
+        //     else {
+        //         res.status(403).send({ message: "forbidden" })
+        //     }
+        // }
 
         // put user to db
         app.put('/user/:email', async (req, res) => {
@@ -166,6 +175,33 @@ async function run() {
             const email = req.query.email
             const query = { email: email }
             const result = await userCollection.findOne(query)
+            res.send(result)
+        })
+
+        // Load all user
+        app.get('/alluser', verifyJWT, async (req, res) => {
+            const query = {}
+            console.log("Hit")
+            const users = await userCollection.find(query).toArray()
+            res.send(users)
+        })
+
+        // make admin
+        app.put('/user/admin/:email', verifyJWT, async (req, res) => {
+            const email = req.params.email
+            const filter = { email: email }
+            const updateDoc = {
+                $set: { role: 'admin' },
+            };
+            const result = await userCollection.updateOne(filter, updateDoc)
+            res.send(result)
+
+        })
+
+        app.delete('/deleteuser/:email', verifyJWT, async (req, res) => {
+            const email = req.params.email
+            const query = { email: email }
+            const result = await userCollection.deleteOne(query)
             res.send(result)
         })
     }
