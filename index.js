@@ -41,16 +41,16 @@ async function run() {
         const userCollection = client.db('auto_parts').collection('users')
         const reviewCollection = client.db('auto_parts').collection('reviews')
 
-        // const verifyAdmin = async (req, res, next) => {
-        //     const requester = req.decoded.email
-        //     const requesterAccount = await userCollection.findOne({ email: requester })
-        //     if (requesterAccount.role === 'admin') {
-        //         next()
-        //     }
-        //     else {
-        //         res.status(403).send({ message: "forbidden" })
-        //     }
-        // }
+        const verifyAdmin = async (req, res, next) => {
+            const requester = req.decoded.email
+             const requesterAccount = await userCollection.findOne({ email: requester })
+             if (requesterAccount.role === 'admin') {
+                next()
+             }
+             else {
+                 res.status(403).send({ message: "forbidden" })
+             }
+         }
 
         // put user to db
         app.put('/user/:email', async (req, res) => {
@@ -198,10 +198,21 @@ async function run() {
 
         })
 
+        app.get('/admin/:email', async (req, res) => {
+            const email = req.params.email
+            const user = await userCollection.findOne({ email: email })
+            const isAdmin = user.role === 'admin'
+            res.send({ admin: isAdmin })
+        })
+
         app.delete('/deleteuser/:email', verifyJWT, async (req, res) => {
             const email = req.params.email
             const query = { email: email }
             const result = await userCollection.deleteOne(query)
+            res.send(result)
+        })
+        app.get('/allorders', verifyJWT, verifyAdmin, async (req, res) => {
+            const result = await orderCollection.find().toArray()
             res.send(result)
         })
     }
