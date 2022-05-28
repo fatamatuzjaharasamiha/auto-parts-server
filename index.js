@@ -7,7 +7,7 @@ const app = express();
 const jwt = require('jsonwebtoken');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 
-//middleware
+
 app.use(cors({ origin: 'https://auto-parts-7a356.web.app' }));
 app.use(express.json());
 
