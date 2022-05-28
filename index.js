@@ -5,6 +5,7 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const port = process.env.PORT || 5000;
 const app = express();
 const jwt = require('jsonwebtoken');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 
 //middleware
 app.use(cors());
@@ -40,17 +41,31 @@ async function run() {
         const orderCollection = client.db('auto_parts').collection('orders')
         const userCollection = client.db('auto_parts').collection('users')
         const reviewCollection = client.db('auto_parts').collection('reviews')
+        const paymentCollection = client.db('auto_parts').collection('payments')
 
         const verifyAdmin = async (req, res, next) => {
             const requester = req.decoded.email
-             const requesterAccount = await userCollection.findOne({ email: requester })
-             if (requesterAccount.role === 'admin') {
+            const requesterAccount = await userCollection.findOne({ email: requester })
+            if (requesterAccount.role === 'admin') {
                 next()
-             }
-             else {
-                 res.status(403).send({ message: "forbidden" })
-             }
-         }
+            }
+            else {
+                res.status(403).send({ message: "forbidden" })
+            }
+        }
+
+        // Paymet api
+        app.post("/create-payment-intent", verifyJWT, async (req, res) => {
+            const tool = req.body;
+            const price = tool.price;
+            const amount = price * 100;
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: 'usd',
+                payment_method_types: ['card']
+            });
+            res.send({ clientSecret: paymentIntent.client_secret })
+        })
 
         // put user to db
         app.put('/user/:email', async (req, res) => {
@@ -92,23 +107,29 @@ async function run() {
             const options = { upsert: true };
             const exist = await orderCollection.findOne(filter)
             if (exist) {
-                const updatedDoc = {
-                    $set: {
-                        address: order.address,
-                        phone: order.phone,
-                        quantity: exist.quantity + order.quantity,
-                        price: exist.price + order.price
-                    }
+                if (exist.shifted) {
+                    const newOrder = await orderCollection.insertOne(order)
+                    return res.send(newOrder)
                 }
-                const tool = await productCollection.findOne(query)
-                const updateTool = {
-                    $set: {
-                        quantity: tool.quantity - order.quantity
+                else {
+                    const updatedDoc = {
+                        $set: {
+                            address: order.address,
+                            phone: order.phone,
+                            quantity: exist.quantity + order.quantity,
+                            price: exist.price + order.price
+                        }
                     }
+                    const tool = await productCollection.findOne(query)
+                    const updateTool = {
+                        $set: {
+                            quantity: tool.quantity - order.quantity
+                        }
+                    }
+                    const updatedTool = await productCollection.updateOne(query, updateTool, options)
+                    const updatedOrder = await orderCollection.updateOne(filter, updatedDoc, options)
+                    return res.send({ updatedOrder, updatedTool })
                 }
-                const updatedTool = await productCollection.updateOne(query, updateTool, options)
-                const updatedOrder = await orderCollection.updateOne(filter, updatedDoc, options)
-                return res.send({ updatedOrder, updatedTool })
             }
 
             else {
@@ -219,6 +240,49 @@ async function run() {
         app.post('/addproduct', verifyJWT, verifyAdmin, async (req, res) => {
             const tool = req.body
             const result = await productCollection.insertOne(tool)
+            res.send(result)
+        })
+
+        app.delete('/deletetool/:id', verifyJWT, verifyAdmin, async (req, res) => {
+            const id = req.params.id
+            const query = { _id: ObjectId(id) }
+            const result = await productCollection.deleteOne(query)
+            res.send(result)
+
+        })
+        // Patch for update payment status
+        app.patch('/order/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id
+            const payment = req.body
+            const filter = { _id: ObjectId(id) }
+            const updatedDoc = {
+                $set: {
+                    paid: true,
+                    transactionId: payment.transactionId,
+                }
+            }
+            const result = await paymentCollection.insertOne(payment)
+            const updatedBooking = await orderCollection.updateOne(filter, updatedDoc)
+            res.send(updatedDoc)
+        })
+
+        app.get('/order/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id
+            const query = { _id: ObjectId(id) }
+            const result = await orderCollection.findOne(query)
+            res.send(result)
+        })
+
+        // Handle shift status by admin
+        app.patch('/shifted/:id', verifyJWT, verifyAdmin, async (req, res) => {
+            const id = req.params.id
+            const filter = { _id: ObjectId(id) }
+            const updateDoc = {
+                $set: {
+                    shifted: true
+                }
+            }
+            const result = await orderCollection.updateOne(filter, updateDoc)
             res.send(result)
         })
     }
